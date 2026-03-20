@@ -99,29 +99,44 @@ def extract_main_content(html: str, url: str) -> tuple[str, str, str]:
     # 用 BeautifulSoup 进一步清理
     soup = BeautifulSoup(summary_html, "lxml")
 
-    # 删除无用元素
-    for tag in soup(["script", "style", "iframe", "noscript",
-                     "aside", "nav", "footer", "header",
-                     "form", "button", "input", "svg"]):
+    # 删除无用元素（先收集成列表，再统一删除，避免边遍历边修改树导致 None）
+    for tag in list(soup(["script", "style", "iframe", "noscript",
+                          "aside", "nav", "footer", "header",
+                          "form", "button", "input", "svg"])):
         tag.decompose()
 
-    # 删除纯广告 class（常见模式）
+    # 删除纯广告 class/id（常见模式）
     ad_patterns = re.compile(
         r"(ad|ads|advert|banner|sponsor|promo|sidebar|recommend|related|comment)",
         re.I
     )
+    # 先收集需要删除的标签，再统一 decompose，防止迭代过程中树结构变化
+    to_remove = []
     for tag in soup.find_all(True):
-        classes = " ".join(tag.get("class", []))
-        ids = tag.get("id", "")
-        if ad_patterns.search(classes) or ad_patterns.search(ids):
+        if tag is None or not hasattr(tag, "attrs") or tag.attrs is None:
+            continue
+        try:
+            classes = " ".join(tag.get("class") or [])
+            ids = tag.get("id") or ""
+            if ad_patterns.search(classes) or ad_patterns.search(ids):
+                to_remove.append(tag)
+        except Exception:
+            continue
+    for tag in to_remove:
+        try:
             tag.decompose()
+        except Exception:
+            pass
 
     # 补全相对链接（可选）
     base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
     for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if href.startswith("/"):
-            a["href"] = base + href
+        try:
+            href = a["href"]
+            if href.startswith("/"):
+                a["href"] = base + href
+        except Exception:
+            pass
 
     return title, soup.get_text()[:200].strip(), str(soup)
 
